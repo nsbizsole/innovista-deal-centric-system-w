@@ -824,7 +824,10 @@ async def create_progress_log(
         "created_at": now
     }
     
-    await db.progress_logs.insert_one(log_doc)
+    # Insert without returning the MongoDB _id
+    result = await db.progress_logs.insert_one(log_doc)
+    # Return the doc without _id
+    return {k: v for k, v in log_doc.items() if k != '_id'}
     
     # Update task progress if task_id provided
     if task_id:
