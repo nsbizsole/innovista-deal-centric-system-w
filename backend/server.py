@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -18,12 +18,12 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
-mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
+mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ.get('DB_NAME', 'procon_pms')]
+db = client[os.environ['DB_NAME']]
 
 # JWT Config
-JWT_SECRET = os.environ.get('JWT_SECRET', 'pms_secret_key_2024_construction')
+JWT_SECRET = os.environ.get('JWT_SECRET', 'dealcentric_secret_2024')
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24
 
@@ -32,22 +32,16 @@ UPLOAD_DIR = ROOT_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 # Create the main app
-app = FastAPI(title="ProCon PMS API", description="Construction Project Management System")
-
-# Mount static files for uploads
+app = FastAPI(title="Deal-Centric PMS API")
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
-# Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
-
 security = HTTPBearer()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ==================== MODELS ====================
-
+# ==================== USER ROLES ====================
 class UserRole:
     ADMIN = "admin"
     PROJECT_MANAGER = "project_manager"
@@ -58,15 +52,21 @@ class UserRole:
     CLIENT_B2B = "client_b2b"
     CLIENT_RESIDENTIAL = "client_residential"
 
-class ProjectStatus:
-    PLANNING = "planning"
-    PROCUREMENT = "procurement"
+# ==================== DEAL STAGES ====================
+class DealStage:
+    INQUIRY = "inquiry"
+    QUOTATION = "quotation"
+    NEGOTIATION = "negotiation"
+    CONTRACT = "contract"
+    EXECUTION = "execution"
     FABRICATION = "fabrication"
     INSTALLATION = "installation"
     HANDOVER = "handover"
+    COMPLETED = "completed"
     CLOSED = "closed"
 
-# Auth Models
+# ==================== PYDANTIC MODELS ====================
+
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
@@ -74,21 +74,11 @@ class UserCreate(BaseModel):
     role: str
     phone: Optional[str] = None
     company: Optional[str] = None
+    commission_rate: Optional[float] = None  # For sales agents
 
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
-
-class UserResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str
-    email: str
-    name: str
-    role: str
-    phone: Optional[str] = None
-    company: Optional[str] = None
-    is_active: bool = True
-    created_at: str
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
@@ -96,181 +86,72 @@ class UserUpdate(BaseModel):
     company: Optional[str] = None
     is_active: Optional[bool] = None
     role: Optional[str] = None
+    commission_rate: Optional[float] = None
 
-# Project Models
-class ProjectCreate(BaseModel):
+class DealCreate(BaseModel):
     name: str
-    client_id: str
-    client_type: str
+    client_name: str
+    client_email: Optional[str] = None
+    client_phone: Optional[str] = None
+    client_type: str  # B2B or residential
     service_types: List[str]
-    approved_value: float
-    start_date: str
-    end_date: str
+    estimated_value: float
     description: Optional[str] = None
-    linked_contract_id: Optional[str] = None
+    referral_agent_id: Optional[str] = None  # Sales agent who referred
+    partner_ids: List[str] = []
 
-class ProjectUpdate(BaseModel):
+class DealUpdate(BaseModel):
     name: Optional[str] = None
-    status: Optional[str] = None
-    approved_value: Optional[float] = None
+    stage: Optional[str] = None
+    estimated_value: Optional[float] = None
+    contract_value: Optional[float] = None
+    description: Optional[str] = None
+    assigned_pm: Optional[str] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
-    description: Optional[str] = None
-    budget: Optional[float] = None
-    actuals: Optional[float] = None
-    assigned_pm: Optional[str] = None
 
-class ProjectResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str
-    name: str
-    client_id: str
-    client_type: str
-    service_types: List[str]
-    approved_value: float
-    start_date: str
-    end_date: str
-    status: str
-    description: Optional[str] = None
-    budget: float = 0
-    actuals: float = 0
-    assigned_pm: Optional[str] = None
-    linked_contract_id: Optional[str] = None
-    created_at: str
-    updated_at: str
-    progress_percentage: float = 0
-
-# Task Models
 class TaskCreate(BaseModel):
-    project_id: str
+    deal_id: str
     name: str
     description: Optional[str] = None
     start_date: str
     end_date: str
-    dependencies: List[str] = []
-    assigned_users: List[str] = []
+    assigned_to: Optional[str] = None
     is_milestone: bool = False
+    is_client_visible: bool = False
 
-class TaskUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
-    status: Optional[str] = None
-    progress: Optional[float] = None
-    dependencies: Optional[List[str]] = None
-    assigned_users: Optional[List[str]] = None
-
-class TaskResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str
-    project_id: str
-    name: str
-    description: Optional[str] = None
-    start_date: str
-    end_date: str
-    status: str
-    progress: float
-    dependencies: List[str]
-    assigned_users: List[str]
-    is_milestone: bool
-    created_at: str
-
-# Document Models
-class DocumentResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str
-    project_id: str
+class DocumentCreate(BaseModel):
+    deal_id: str
     name: str
     doc_type: str
-    file_path: str
-    version: int
-    uploader_id: str
-    uploader_name: Optional[str] = None
-    approval_status: str
-    tags: List[str]
-    linked_task_id: Optional[str] = None
-    created_at: str
+    category: str  # client_facing, internal, deal_relationship
+    is_client_visible: bool = False
 
-# Change Order Models
-class ChangeOrderCreate(BaseModel):
-    project_id: str
-    description: str
-    change_type: str
-    value_impact: float
-    linked_task_id: Optional[str] = None
-
-class ChangeOrderResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str
-    project_id: str
-    description: str
-    change_type: str
-    value_impact: float
-    approval_status: str
-    requested_by: str
-    approved_by: Optional[str] = None
-    linked_task_id: Optional[str] = None
-    created_at: str
-
-# Financial Entry Models
-class FinancialEntryCreate(BaseModel):
-    project_id: str
-    entry_type: str
-    amount: float
-    description: str
-    linked_milestone_id: Optional[str] = None
-
-class FinancialEntryResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str
-    project_id: str
-    entry_type: str
-    amount: float
-    description: str
-    status: str
-    linked_milestone_id: Optional[str] = None
-    created_by: str
-    created_at: str
-
-# Progress Log Models
-class ProgressLogResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str
-    project_id: str
-    user_id: str
-    user_name: Optional[str] = None
+class ProgressUpdate(BaseModel):
+    deal_id: str
     notes: str
-    photos: List[str]
-    progress_update: float
+    progress_percentage: float
+    is_client_visible: bool = True
     task_id: Optional[str] = None
-    created_at: str
 
-# Message Models
+class QuotationCreate(BaseModel):
+    deal_id: str
+    version: int = 1
+    total_amount: float
+    items: List[Dict[str, Any]]
+    notes: Optional[str] = None
+    validity_days: int = 30
+
+class CommissionCreate(BaseModel):
+    deal_id: str
+    agent_id: str
+    rate: float
+    milestone_triggers: List[Dict[str, Any]]  # When to release commission
+
 class MessageCreate(BaseModel):
-    project_id: str
+    deal_id: str
     content: str
-    thread_id: Optional[str] = None
-
-class MessageResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str
-    project_id: str
-    thread_id: str
-    sender_id: str
-    sender_name: Optional[str] = None
-    content: str
-    created_at: str
-
-# Dashboard Models
-class DashboardStats(BaseModel):
-    total_projects: int
-    active_projects: int
-    completed_projects: int
-    total_budget: float
-    total_actuals: float
-    pending_approvals: int
-    overdue_tasks: int
+    visible_to_roles: List[str]  # Which roles can see this message
 
 # ==================== AUTH HELPERS ====================
 
@@ -309,9 +190,19 @@ def require_roles(allowed_roles: List[str]):
         return user
     return role_checker
 
+async def log_activity(entity_id: str, action: str, description: str, user_id: str):
+    await db.activity_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "entity_id": entity_id,
+        "action": action,
+        "description": description,
+        "user_id": user_id,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+
 # ==================== AUTH ENDPOINTS ====================
 
-@api_router.post("/auth/register", response_model=UserResponse)
+@api_router.post("/auth/register")
 async def register_user(user_data: UserCreate, current_user: dict = Depends(require_roles([UserRole.ADMIN]))):
     existing = await db.users.find_one({"email": user_data.email})
     if existing:
@@ -328,8 +219,11 @@ async def register_user(user_data: UserCreate, current_user: dict = Depends(requ
         "role": user_data.role,
         "phone": user_data.phone,
         "company": user_data.company,
+        "commission_rate": user_data.commission_rate,
         "is_active": True,
-        "created_at": now
+        "created_at": now,
+        "deals_won": 0,
+        "total_commission_earned": 0
     }
     
     await db.users.insert_one(user_doc)
@@ -340,615 +234,649 @@ async def register_user(user_data: UserCreate, current_user: dict = Depends(requ
 @api_router.post("/auth/login")
 async def login(credentials: UserLogin):
     user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
-    if not user:
+    if not user or not verify_password(credentials.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    if not verify_password(credentials.password, user["password"]):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    
     if not user.get("is_active", True):
-        raise HTTPException(status_code=401, detail="Account is deactivated")
+        raise HTTPException(status_code=401, detail="Account deactivated")
     
     token = create_token(user["id"], user["role"])
-    
-    return {
-        "token": token,
-        "user": {k: v for k, v in user.items() if k != "password"}
-    }
+    return {"token": token, "user": {k: v for k, v in user.items() if k != "password"}}
 
-@api_router.get("/auth/me", response_model=UserResponse)
+@api_router.get("/auth/me")
 async def get_me(current_user: dict = Depends(get_current_user)):
     return current_user
 
 # ==================== USER MANAGEMENT ====================
 
-@api_router.get("/users", response_model=List[UserResponse])
-async def get_users(current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.PROJECT_MANAGER]))):
-    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
+@api_router.get("/users")
+async def get_users(role: Optional[str] = None, current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.PROJECT_MANAGER]))):
+    query = {}
+    if role:
+        query["role"] = role
+    users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(1000)
     return users
 
-@api_router.get("/users/{user_id}", response_model=UserResponse)
-async def get_user(user_id: str, current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.PROJECT_MANAGER]))):
+@api_router.get("/users/{user_id}")
+async def get_user(user_id: str, current_user: dict = Depends(get_current_user)):
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
-@api_router.put("/users/{user_id}", response_model=UserResponse)
+@api_router.put("/users/{user_id}")
 async def update_user(user_id: str, user_update: UserUpdate, current_user: dict = Depends(require_roles([UserRole.ADMIN]))):
     update_data = {k: v for k, v in user_update.model_dump().items() if v is not None}
     if not update_data:
-        raise HTTPException(status_code=400, detail="No update data provided")
+        raise HTTPException(status_code=400, detail="No update data")
     
-    result = await db.users.update_one({"id": user_id}, {"$set": update_data})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    await log_activity(user_id, "user_updated", f"User updated", current_user["id"])
-    
+    await db.users.update_one({"id": user_id}, {"$set": update_data})
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
     return user
 
 @api_router.delete("/users/{user_id}")
-async def delete_user(user_id: str, current_user: dict = Depends(require_roles([UserRole.ADMIN]))):
-    if user_id == current_user["id"]:
-        raise HTTPException(status_code=400, detail="Cannot delete yourself")
-    
-    result = await db.users.update_one({"id": user_id}, {"$set": {"is_active": False}})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    await log_activity(user_id, "user_deactivated", f"User deactivated", current_user["id"])
-    
+async def deactivate_user(user_id: str, current_user: dict = Depends(require_roles([UserRole.ADMIN]))):
+    await db.users.update_one({"id": user_id}, {"$set": {"is_active": False}})
     return {"message": "User deactivated"}
 
-# ==================== PROJECT ENDPOINTS ====================
+# ==================== DEAL MANAGEMENT ====================
 
-@api_router.post("/projects", response_model=ProjectResponse)
-async def create_project(project: ProjectCreate, current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.PROJECT_MANAGER]))):
-    project_id = str(uuid.uuid4())
+@api_router.post("/deals")
+async def create_deal(deal: DealCreate, current_user: dict = Depends(get_current_user)):
+    deal_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
-    project_doc = {
-        "id": project_id,
-        "name": project.name,
-        "client_id": project.client_id,
-        "client_type": project.client_type,
-        "service_types": project.service_types,
-        "approved_value": project.approved_value,
-        "start_date": project.start_date,
-        "end_date": project.end_date,
-        "description": project.description,
-        "linked_contract_id": project.linked_contract_id,
-        "status": ProjectStatus.PLANNING,
-        "budget": project.approved_value,
-        "actuals": 0,
-        "assigned_pm": current_user["id"] if current_user["role"] == UserRole.PROJECT_MANAGER else None,
+    # Set referral agent based on who created or specified
+    referral_agent_id = deal.referral_agent_id
+    if current_user["role"] == UserRole.SALES_AGENT and not referral_agent_id:
+        referral_agent_id = current_user["id"]
+    
+    deal_doc = {
+        "id": deal_id,
+        "name": deal.name,
+        "client_name": deal.client_name,
+        "client_email": deal.client_email,
+        "client_phone": deal.client_phone,
+        "client_type": deal.client_type,
+        "service_types": deal.service_types,
+        "estimated_value": deal.estimated_value,
+        "contract_value": None,
+        "description": deal.description,
+        "stage": DealStage.INQUIRY,
+        "referral_agent_id": referral_agent_id,
+        "partner_ids": deal.partner_ids,
+        "assigned_pm": None,
+        "assigned_supervisor": None,
+        "assigned_fabricators": [],
+        "start_date": None,
+        "end_date": None,
         "progress_percentage": 0,
+        "created_by": current_user["id"],
         "created_at": now,
         "updated_at": now,
-        "created_by": current_user["id"]
+        "client_visible_notes": [],
+        "internal_notes": []
     }
     
-    await db.projects.insert_one(project_doc)
-    await log_activity(project_id, "project_created", f"Project '{project.name}' created", current_user["id"])
+    await db.deals.insert_one(deal_doc)
+    await log_activity(deal_id, "deal_created", f"Deal '{deal.name}' created", current_user["id"])
     
-    return {k: v for k, v in project_doc.items() if k != "_id"}
+    # Create commission record if agent is assigned
+    if referral_agent_id:
+        agent = await db.users.find_one({"id": referral_agent_id}, {"_id": 0})
+        if agent and agent.get("commission_rate"):
+            await db.commissions.insert_one({
+                "id": str(uuid.uuid4()),
+                "deal_id": deal_id,
+                "agent_id": referral_agent_id,
+                "rate": agent["commission_rate"],
+                "status": "pending",
+                "earned_amount": 0,
+                "released_amount": 0,
+                "created_at": now
+            })
+    
+    return {k: v for k, v in deal_doc.items() if k != "_id"}
 
-@api_router.get("/projects", response_model=List[ProjectResponse])
-async def get_projects(current_user: dict = Depends(get_current_user)):
+@api_router.get("/deals")
+async def get_deals(stage: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     query = {}
+    role = current_user["role"]
     
-    if current_user["role"] in [UserRole.CLIENT_B2B, UserRole.CLIENT_RESIDENTIAL]:
-        query["client_id"] = current_user["id"]
-    elif current_user["role"] == UserRole.PROJECT_MANAGER:
-        query["$or"] = [{"assigned_pm": current_user["id"]}, {"created_by": current_user["id"]}]
-    elif current_user["role"] in [UserRole.SALES_AGENT, UserRole.PARTNER]:
-        query["$or"] = [{"created_by": current_user["id"]}, {"assigned_users": current_user["id"]}]
-    elif current_user["role"] in [UserRole.SUPERVISOR, UserRole.FABRICATOR]:
-        task_project_ids = await db.tasks.distinct("project_id", {"assigned_users": current_user["id"]})
-        if task_project_ids:
-            query["id"] = {"$in": task_project_ids}
-        else:
-            return []
+    # Role-based filtering
+    if role == UserRole.SALES_AGENT:
+        query["referral_agent_id"] = current_user["id"]
+    elif role == UserRole.PARTNER:
+        query["partner_ids"] = current_user["id"]
+    elif role == UserRole.PROJECT_MANAGER:
+        query["assigned_pm"] = current_user["id"]
+    elif role == UserRole.SUPERVISOR:
+        query["assigned_supervisor"] = current_user["id"]
+    elif role == UserRole.FABRICATOR:
+        query["assigned_fabricators"] = current_user["id"]
+    elif role in [UserRole.CLIENT_B2B, UserRole.CLIENT_RESIDENTIAL]:
+        query["$or"] = [
+            {"client_email": current_user["email"]},
+            {"client_id": current_user["id"]}
+        ]
     
-    projects = await db.projects.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    return projects
+    if stage:
+        query["stage"] = stage
+    
+    deals = await db.deals.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    
+    # Filter sensitive data for non-admin roles
+    if role not in [UserRole.ADMIN, UserRole.PROJECT_MANAGER]:
+        for deal in deals:
+            if role in [UserRole.CLIENT_B2B, UserRole.CLIENT_RESIDENTIAL]:
+                # Clients don't see internal costs
+                deal.pop("internal_notes", None)
+            elif role == UserRole.SALES_AGENT:
+                # Agents don't see margin data
+                deal.pop("internal_notes", None)
+    
+    return deals
 
-@api_router.get("/projects/{project_id}", response_model=ProjectResponse)
-async def get_project(project_id: str, current_user: dict = Depends(get_current_user)):
-    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+@api_router.get("/deals/{deal_id}")
+async def get_deal(deal_id: str, current_user: dict = Depends(get_current_user)):
+    deal = await db.deals.find_one({"id": deal_id}, {"_id": 0})
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
     
-    if current_user["role"] in [UserRole.CLIENT_B2B, UserRole.CLIENT_RESIDENTIAL]:
-        if project["client_id"] != current_user["id"]:
-            raise HTTPException(status_code=403, detail="Access denied")
+    role = current_user["role"]
     
-    return project
+    # Filter based on role
+    if role in [UserRole.CLIENT_B2B, UserRole.CLIENT_RESIDENTIAL]:
+        deal.pop("internal_notes", None)
+        deal.pop("referral_agent_id", None)
+    elif role == UserRole.SALES_AGENT:
+        deal.pop("internal_notes", None)
+    elif role == UserRole.FABRICATOR:
+        # Fabricators only see assigned job details
+        pass
+    
+    return deal
 
-@api_router.put("/projects/{project_id}", response_model=ProjectResponse)
-async def update_project(project_id: str, update: ProjectUpdate, current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.PROJECT_MANAGER]))):
+@api_router.put("/deals/{deal_id}")
+async def update_deal(deal_id: str, update: DealUpdate, current_user: dict = Depends(get_current_user)):
+    allowed_roles = [UserRole.ADMIN, UserRole.PROJECT_MANAGER]
+    if current_user["role"] not in allowed_roles:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     
-    result = await db.projects.update_one({"id": project_id}, {"$set": update_data})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Project not found")
+    await db.deals.update_one({"id": deal_id}, {"$set": update_data})
     
-    await log_activity(project_id, "project_updated", f"Project updated", current_user["id"])
+    # Update commission if stage changed to contract
+    if update.stage == DealStage.CONTRACT and update.contract_value:
+        commission = await db.commissions.find_one({"deal_id": deal_id}, {"_id": 0})
+        if commission:
+            earned = update.contract_value * (commission["rate"] / 100)
+            await db.commissions.update_one(
+                {"deal_id": deal_id},
+                {"$set": {"earned_amount": earned, "status": "active"}}
+            )
     
-    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    return project
+    await log_activity(deal_id, "deal_updated", f"Deal updated to stage {update.stage}", current_user["id"])
+    
+    deal = await db.deals.find_one({"id": deal_id}, {"_id": 0})
+    return deal
 
-@api_router.delete("/projects/{project_id}")
-async def delete_project(project_id: str, current_user: dict = Depends(require_roles([UserRole.ADMIN]))):
-    result = await db.projects.delete_one({"id": project_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Project not found")
+@api_router.post("/deals/{deal_id}/assign")
+async def assign_team(
+    deal_id: str,
+    pm_id: Optional[str] = None,
+    supervisor_id: Optional[str] = None,
+    fabricator_ids: Optional[List[str]] = None,
+    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.PROJECT_MANAGER]))
+):
+    update = {}
+    if pm_id:
+        update["assigned_pm"] = pm_id
+    if supervisor_id:
+        update["assigned_supervisor"] = supervisor_id
+    if fabricator_ids:
+        update["assigned_fabricators"] = fabricator_ids
     
-    await db.tasks.delete_many({"project_id": project_id})
-    await db.documents.delete_many({"project_id": project_id})
-    await db.change_orders.delete_many({"project_id": project_id})
-    await db.financial_entries.delete_many({"project_id": project_id})
-    await db.progress_logs.delete_many({"project_id": project_id})
-    await db.messages.delete_many({"project_id": project_id})
+    if update:
+        update["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.deals.update_one({"id": deal_id}, {"$set": update})
     
-    await log_activity(project_id, "project_deleted", f"Project deleted", current_user["id"])
-    
-    return {"message": "Project deleted"}
+    return {"message": "Team assigned"}
 
-# ==================== TASK ENDPOINTS ====================
+# ==================== QUOTATION MANAGEMENT ====================
 
-@api_router.post("/tasks", response_model=TaskResponse)
+@api_router.post("/quotations")
+async def create_quotation(quotation: QuotationCreate, current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.PROJECT_MANAGER]))):
+    quot_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    quot_doc = {
+        "id": quot_id,
+        "deal_id": quotation.deal_id,
+        "version": quotation.version,
+        "total_amount": quotation.total_amount,
+        "items": quotation.items,
+        "notes": quotation.notes,
+        "validity_days": quotation.validity_days,
+        "status": "draft",
+        "client_approved": False,
+        "created_by": current_user["id"],
+        "created_at": now
+    }
+    
+    await db.quotations.insert_one(quot_doc)
+    
+    # Update deal stage
+    await db.deals.update_one({"id": quotation.deal_id}, {"$set": {"stage": DealStage.QUOTATION}})
+    
+    return {k: v for k, v in quot_doc.items() if k != "_id"}
+
+@api_router.get("/quotations")
+async def get_quotations(deal_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {}
+    if deal_id:
+        query["deal_id"] = deal_id
+    
+    quotations = await db.quotations.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+    
+    # For clients, only show sent quotations
+    if current_user["role"] in [UserRole.CLIENT_B2B, UserRole.CLIENT_RESIDENTIAL]:
+        quotations = [q for q in quotations if q["status"] == "sent"]
+    
+    return quotations
+
+@api_router.put("/quotations/{quot_id}/send")
+async def send_quotation(quot_id: str, current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.PROJECT_MANAGER]))):
+    await db.quotations.update_one({"id": quot_id}, {"$set": {"status": "sent"}})
+    return {"message": "Quotation sent to client"}
+
+@api_router.put("/quotations/{quot_id}/approve")
+async def approve_quotation(quot_id: str, approved: bool, current_user: dict = Depends(get_current_user)):
+    # Clients or admin can approve
+    status = "approved" if approved else "rejected"
+    await db.quotations.update_one({"id": quot_id}, {"$set": {"status": status, "client_approved": approved}})
+    
+    if approved:
+        quot = await db.quotations.find_one({"id": quot_id}, {"_id": 0})
+        if quot:
+            await db.deals.update_one(
+                {"id": quot["deal_id"]},
+                {"$set": {"stage": DealStage.CONTRACT, "contract_value": quot["total_amount"]}}
+            )
+    
+    return {"message": f"Quotation {status}"}
+
+# ==================== TASK MANAGEMENT ====================
+
+@api_router.post("/tasks")
 async def create_task(task: TaskCreate, current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.PROJECT_MANAGER]))):
     task_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
     task_doc = {
         "id": task_id,
-        "project_id": task.project_id,
+        "deal_id": task.deal_id,
         "name": task.name,
         "description": task.description,
         "start_date": task.start_date,
         "end_date": task.end_date,
+        "assigned_to": task.assigned_to,
         "status": "pending",
         "progress": 0,
-        "dependencies": task.dependencies,
-        "assigned_users": task.assigned_users,
         "is_milestone": task.is_milestone,
-        "created_at": now,
-        "created_by": current_user["id"]
+        "is_client_visible": task.is_client_visible,
+        "created_at": now
     }
     
     await db.tasks.insert_one(task_doc)
-    await log_activity(task.project_id, "task_created", f"Task '{task.name}' created", current_user["id"])
-    
     return {k: v for k, v in task_doc.items() if k != "_id"}
 
-@api_router.get("/tasks", response_model=List[TaskResponse])
-async def get_tasks(project_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+@api_router.get("/tasks")
+async def get_tasks(deal_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     query = {}
-    if project_id:
-        query["project_id"] = project_id
+    if deal_id:
+        query["deal_id"] = deal_id
     
+    # Filter by assignment for operational roles
     if current_user["role"] in [UserRole.SUPERVISOR, UserRole.FABRICATOR]:
-        query["assigned_users"] = current_user["id"]
+        query["assigned_to"] = current_user["id"]
     
     tasks = await db.tasks.find(query, {"_id": 0}).sort("start_date", 1).to_list(1000)
+    
+    # Clients only see client-visible tasks
+    if current_user["role"] in [UserRole.CLIENT_B2B, UserRole.CLIENT_RESIDENTIAL]:
+        tasks = [t for t in tasks if t.get("is_client_visible", False)]
+    
     return tasks
 
-@api_router.get("/tasks/{task_id}", response_model=TaskResponse)
-async def get_task(task_id: str, current_user: dict = Depends(get_current_user)):
-    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return task
-
-@api_router.put("/tasks/{task_id}", response_model=TaskResponse)
-async def update_task(task_id: str, update: TaskUpdate, current_user: dict = Depends(get_current_user)):
-    if current_user["role"] not in [UserRole.ADMIN, UserRole.PROJECT_MANAGER, UserRole.SUPERVISOR, UserRole.FABRICATOR]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+@api_router.put("/tasks/{task_id}")
+async def update_task(task_id: str, status: Optional[str] = None, progress: Optional[float] = None, current_user: dict = Depends(get_current_user)):
+    update = {}
+    if status:
+        update["status"] = status
+    if progress is not None:
+        update["progress"] = progress
     
-    update_data = {k: v for k, v in update.model_dump().items() if v is not None}
-    
-    result = await db.tasks.update_one({"id": task_id}, {"$set": update_data})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Task not found")
+    if update:
+        await db.tasks.update_one({"id": task_id}, {"$set": update})
     
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     
-    await update_project_progress(task["project_id"])
-    await log_activity(task["project_id"], "task_updated", f"Task '{task['name']}' updated", current_user["id"])
+    # Update deal progress
+    if task:
+        await update_deal_progress(task["deal_id"])
     
     return task
 
-@api_router.delete("/tasks/{task_id}")
-async def delete_task(task_id: str, current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.PROJECT_MANAGER]))):
-    task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    await db.tasks.delete_one({"id": task_id})
-    await log_activity(task["project_id"], "task_deleted", f"Task deleted", current_user["id"])
-    
-    return {"message": "Task deleted"}
-
-async def update_project_progress(project_id: str):
-    tasks = await db.tasks.find({"project_id": project_id}, {"_id": 0}).to_list(1000)
+async def update_deal_progress(deal_id: str):
+    tasks = await db.tasks.find({"deal_id": deal_id}, {"_id": 0}).to_list(100)
     if tasks:
-        total_progress = sum(t.get("progress", 0) for t in tasks) / len(tasks)
-        await db.projects.update_one({"id": project_id}, {"$set": {"progress_percentage": round(total_progress, 2)}})
+        total = sum(t.get("progress", 0) for t in tasks) / len(tasks)
+        await db.deals.update_one({"id": deal_id}, {"$set": {"progress_percentage": round(total, 2)}})
 
-# ==================== DOCUMENT ENDPOINTS ====================
+# ==================== PROGRESS UPDATES ====================
 
-@api_router.post("/documents")
+@api_router.post("/progress-updates")
+async def create_progress_update(
+    deal_id: str = Form(...),
+    notes: str = Form(...),
+    progress_percentage: float = Form(...),
+    is_client_visible: bool = Form(True),
+    task_id: Optional[str] = Form(None),
+    photos: List[UploadFile] = File(default=[]),
+    current_user: dict = Depends(get_current_user)
+):
+    update_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Save photos
+    photo_paths = []
+    for photo in photos:
+        ext = photo.filename.split(".")[-1] if "." in photo.filename else "jpg"
+        fname = f"{update_id}_{len(photo_paths)}.{ext}"
+        fpath = UPLOAD_DIR / fname
+        content = await photo.read()
+        with open(fpath, "wb") as f:
+            f.write(content)
+        photo_paths.append(f"/uploads/{fname}")
+    
+    update_doc = {
+        "id": update_id,
+        "deal_id": deal_id,
+        "notes": notes,
+        "progress_percentage": progress_percentage,
+        "photos": photo_paths,
+        "is_client_visible": is_client_visible,
+        "task_id": task_id,
+        "created_by": current_user["id"],
+        "created_by_name": current_user["name"],
+        "created_at": now
+    }
+    
+    await db.progress_updates.insert_one(update_doc)
+    
+    # Update task if specified
+    if task_id:
+        await db.tasks.update_one({"id": task_id}, {"$set": {"progress": progress_percentage}})
+    
+    # Update deal progress
+    await db.deals.update_one({"id": deal_id}, {"$set": {"progress_percentage": progress_percentage}})
+    
+    return {k: v for k, v in update_doc.items() if k != "_id"}
+
+@api_router.get("/progress-updates")
+async def get_progress_updates(deal_id: str, current_user: dict = Depends(get_current_user)):
+    updates = await db.progress_updates.find({"deal_id": deal_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    
+    # Filter for clients
+    if current_user["role"] in [UserRole.CLIENT_B2B, UserRole.CLIENT_RESIDENTIAL]:
+        updates = [u for u in updates if u.get("is_client_visible", False)]
+    
+    return updates
+
+# ==================== DOCUMENT MANAGEMENT ====================
+
+@api_router.post("/documents/upload")
 async def upload_document(
-    project_id: str,
-    name: str,
-    doc_type: str,
+    deal_id: str = Form(...),
+    name: str = Form(...),
+    doc_type: str = Form(...),
+    category: str = Form(...),
+    is_client_visible: bool = Form(False),
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user)
 ):
     doc_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
-    file_ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
-    file_name = f"{doc_id}.{file_ext}"
-    file_path = UPLOAD_DIR / file_name
-    
+    ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
+    fname = f"{doc_id}.{ext}"
+    fpath = UPLOAD_DIR / fname
     content = await file.read()
-    with open(file_path, "wb") as f:
+    with open(fpath, "wb") as f:
         f.write(content)
     
-    existing = await db.documents.find_one({"project_id": project_id, "name": name}, {"_id": 0})
+    # Check version
+    existing = await db.documents.find_one({"deal_id": deal_id, "name": name}, {"_id": 0})
     version = (existing.get("version", 0) + 1) if existing else 1
     
-    doc_doc = {
+    doc = {
         "id": doc_id,
-        "project_id": project_id,
+        "deal_id": deal_id,
         "name": name,
         "doc_type": doc_type,
-        "file_path": f"/uploads/{file_name}",
+        "category": category,  # client_facing, internal, deal_relationship
+        "file_path": f"/uploads/{fname}",
         "version": version,
-        "uploader_id": current_user["id"],
-        "uploader_name": current_user["name"],
+        "is_client_visible": is_client_visible,
         "approval_status": "pending",
-        "tags": [],
-        "linked_task_id": None,
+        "uploaded_by": current_user["id"],
+        "uploaded_by_name": current_user["name"],
         "created_at": now
     }
     
-    await db.documents.insert_one(doc_doc)
-    await log_activity(project_id, "document_uploaded", f"Document '{name}' uploaded", current_user["id"])
-    
-    return {k: v for k, v in doc_doc.items() if k != "_id"}
+    await db.documents.insert_one(doc)
+    return {k: v for k, v in doc.items() if k != "_id"}
 
-@api_router.get("/documents", response_model=List[DocumentResponse])
-async def get_documents(project_id: Optional[str] = None, doc_type: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+@api_router.get("/documents")
+async def get_documents(deal_id: Optional[str] = None, category: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     query = {}
-    if project_id:
-        query["project_id"] = project_id
-    if doc_type:
-        query["doc_type"] = doc_type
+    if deal_id:
+        query["deal_id"] = deal_id
+    if category:
+        query["category"] = category
     
+    docs = await db.documents.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    
+    # Filter for clients
     if current_user["role"] in [UserRole.CLIENT_B2B, UserRole.CLIENT_RESIDENTIAL]:
-        query["approval_status"] = "approved"
+        docs = [d for d in docs if d.get("is_client_visible", False) and d.get("approval_status") == "approved"]
     
-    docs = await db.documents.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    # Filter for agents
+    if current_user["role"] == UserRole.SALES_AGENT:
+        docs = [d for d in docs if d.get("category") != "internal"]
+    
     return docs
 
 @api_router.put("/documents/{doc_id}/approve")
 async def approve_document(doc_id: str, approved: bool, current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.PROJECT_MANAGER]))):
     status = "approved" if approved else "rejected"
-    result = await db.documents.update_one({"id": doc_id}, {"$set": {"approval_status": status}})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    doc = await db.documents.find_one({"id": doc_id}, {"_id": 0})
-    await log_activity(doc["project_id"], "document_approval", f"Document '{doc['name']}' {status}", current_user["id"])
-    
+    await db.documents.update_one({"id": doc_id}, {"$set": {"approval_status": status}})
     return {"message": f"Document {status}"}
 
-# ==================== CHANGE ORDER ENDPOINTS ====================
+# ==================== COMMISSION TRACKING ====================
 
-@api_router.post("/change-orders", response_model=ChangeOrderResponse)
-async def create_change_order(change_order: ChangeOrderCreate, current_user: dict = Depends(get_current_user)):
-    co_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    
-    co_doc = {
-        "id": co_id,
-        "project_id": change_order.project_id,
-        "description": change_order.description,
-        "change_type": change_order.change_type,
-        "value_impact": change_order.value_impact,
-        "approval_status": "pending",
-        "requested_by": current_user["id"],
-        "approved_by": None,
-        "linked_task_id": change_order.linked_task_id,
-        "created_at": now
-    }
-    
-    await db.change_orders.insert_one(co_doc)
-    await log_activity(change_order.project_id, "change_order_created", f"Change order: {change_order.description}", current_user["id"])
-    
-    return {k: v for k, v in co_doc.items() if k != "_id"}
-
-@api_router.get("/change-orders", response_model=List[ChangeOrderResponse])
-async def get_change_orders(project_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+@api_router.get("/commissions")
+async def get_commissions(current_user: dict = Depends(get_current_user)):
     query = {}
-    if project_id:
-        query["project_id"] = project_id
     
-    cos = await db.change_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    return cos
+    if current_user["role"] == UserRole.SALES_AGENT:
+        query["agent_id"] = current_user["id"]
+    
+    commissions = await db.commissions.find(query, {"_id": 0}).to_list(500)
+    
+    # Enrich with deal info
+    for comm in commissions:
+        deal = await db.deals.find_one({"id": comm["deal_id"]}, {"_id": 0})
+        if deal:
+            comm["deal_name"] = deal.get("name")
+            comm["deal_stage"] = deal.get("stage")
+            comm["deal_value"] = deal.get("contract_value") or deal.get("estimated_value")
+    
+    return commissions
 
-@api_router.put("/change-orders/{co_id}/approve")
-async def approve_change_order(co_id: str, approved: bool, current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.PROJECT_MANAGER]))):
-    status = "approved" if approved else "rejected"
+@api_router.put("/commissions/{comm_id}/release")
+async def release_commission(comm_id: str, amount: float, current_user: dict = Depends(require_roles([UserRole.ADMIN]))):
+    comm = await db.commissions.find_one({"id": comm_id}, {"_id": 0})
+    if not comm:
+        raise HTTPException(status_code=404, detail="Commission not found")
     
-    co = await db.change_orders.find_one({"id": co_id}, {"_id": 0})
-    if not co:
-        raise HTTPException(status_code=404, detail="Change order not found")
+    new_released = comm.get("released_amount", 0) + amount
+    await db.commissions.update_one(
+        {"id": comm_id},
+        {"$set": {"released_amount": new_released}}
+    )
     
-    await db.change_orders.update_one({"id": co_id}, {"$set": {"approval_status": status, "approved_by": current_user["id"]}})
+    # Update agent stats
+    await db.users.update_one(
+        {"id": comm["agent_id"]},
+        {"$inc": {"total_commission_earned": amount}}
+    )
     
-    if approved:
-        project = await db.projects.find_one({"id": co["project_id"]}, {"_id": 0})
-        new_value = project["approved_value"] + co["value_impact"]
-        new_budget = project["budget"] + co["value_impact"]
-        await db.projects.update_one({"id": co["project_id"]}, {"$set": {"approved_value": new_value, "budget": new_budget}})
-    
-    await log_activity(co["project_id"], "change_order_approval", f"Change order {status}", current_user["id"])
-    
-    return {"message": f"Change order {status}"}
+    return {"message": f"Released ${amount}"}
 
-# ==================== FINANCIAL ENDPOINTS ====================
+# ==================== MESSAGES ====================
 
-@api_router.post("/financial-entries", response_model=FinancialEntryResponse)
-async def create_financial_entry(entry: FinancialEntryCreate, current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.PROJECT_MANAGER]))):
-    entry_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    
-    entry_doc = {
-        "id": entry_id,
-        "project_id": entry.project_id,
-        "entry_type": entry.entry_type,
-        "amount": entry.amount,
-        "description": entry.description,
-        "status": "pending",
-        "linked_milestone_id": entry.linked_milestone_id,
-        "created_by": current_user["id"],
-        "created_at": now
-    }
-    
-    await db.financial_entries.insert_one(entry_doc)
-    
-    if entry.entry_type == "payment":
-        await db.projects.update_one({"id": entry.project_id}, {"$inc": {"actuals": entry.amount}})
-    
-    await log_activity(entry.project_id, "financial_entry_created", f"{entry.entry_type}: {entry.amount}", current_user["id"])
-    
-    return {k: v for k, v in entry_doc.items() if k != "_id"}
-
-@api_router.get("/financial-entries", response_model=List[FinancialEntryResponse])
-async def get_financial_entries(project_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    query = {}
-    if project_id:
-        query["project_id"] = project_id
-    
-    if current_user["role"] in [UserRole.CLIENT_B2B, UserRole.CLIENT_RESIDENTIAL]:
-        query["entry_type"] = "invoice"
-    
-    entries = await db.financial_entries.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    return entries
-
-@api_router.put("/financial-entries/{entry_id}/status")
-async def update_financial_status(entry_id: str, status: str, current_user: dict = Depends(require_roles([UserRole.ADMIN]))):
-    result = await db.financial_entries.update_one({"id": entry_id}, {"$set": {"status": status}})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Financial entry not found")
-    
-    entry = await db.financial_entries.find_one({"id": entry_id}, {"_id": 0})
-    await log_activity(entry["project_id"], "financial_status_updated", f"Status: {status}", current_user["id"])
-    
-    return {"message": "Status updated"}
-
-# ==================== PROGRESS LOG ENDPOINTS ====================
-
-@api_router.post("/progress-logs")
-async def create_progress_log(
-    project_id: str,
-    notes: str,
-    progress_update: float,
-    task_id: Optional[str] = None,
-    photos: List[UploadFile] = File(default=[]),
-    current_user: dict = Depends(get_current_user)
-):
-    log_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    
-    photo_paths = []
-    for photo in photos:
-        file_ext = photo.filename.split(".")[-1] if "." in photo.filename else "jpg"
-        file_name = f"{log_id}_{len(photo_paths)}.{file_ext}"
-        file_path = UPLOAD_DIR / file_name
-        content = await photo.read()
-        with open(file_path, "wb") as f:
-            f.write(content)
-        photo_paths.append(f"/uploads/{file_name}")
-    
-    log_doc = {
-        "id": log_id,
-        "project_id": project_id,
-        "user_id": current_user["id"],
-        "user_name": current_user["name"],
-        "notes": notes,
-        "photos": photo_paths,
-        "progress_update": progress_update,
-        "task_id": task_id,
-        "created_at": now
-    }
-    
-    await db.progress_logs.insert_one(log_doc)
-    
-    if task_id:
-        await db.tasks.update_one({"id": task_id}, {"$set": {"progress": progress_update}})
-        await update_project_progress(project_id)
-    
-    await log_activity(project_id, "progress_logged", f"Progress: {progress_update}%", current_user["id"])
-    
-    return {k: v for k, v in log_doc.items() if k != "_id"}
-
-@api_router.get("/progress-logs", response_model=List[ProgressLogResponse])
-async def get_progress_logs(project_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    query = {}
-    if project_id:
-        query["project_id"] = project_id
-    
-    logs = await db.progress_logs.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    return logs
-
-# ==================== MESSAGE ENDPOINTS ====================
-
-@api_router.post("/messages", response_model=MessageResponse)
+@api_router.post("/messages")
 async def create_message(message: MessageCreate, current_user: dict = Depends(get_current_user)):
     msg_id = str(uuid.uuid4())
-    thread_id = message.thread_id or str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
     msg_doc = {
         "id": msg_id,
-        "project_id": message.project_id,
-        "thread_id": thread_id,
+        "deal_id": message.deal_id,
+        "content": message.content,
+        "visible_to_roles": message.visible_to_roles,
         "sender_id": current_user["id"],
         "sender_name": current_user["name"],
-        "content": message.content,
+        "sender_role": current_user["role"],
         "created_at": now
     }
     
     await db.messages.insert_one(msg_doc)
-    
     return {k: v for k, v in msg_doc.items() if k != "_id"}
 
-@api_router.get("/messages", response_model=List[MessageResponse])
-async def get_messages(project_id: str, thread_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    query = {"project_id": project_id}
-    if thread_id:
-        query["thread_id"] = thread_id
+@api_router.get("/messages")
+async def get_messages(deal_id: str, current_user: dict = Depends(get_current_user)):
+    messages = await db.messages.find({"deal_id": deal_id}, {"_id": 0}).sort("created_at", 1).to_list(500)
     
-    messages = await db.messages.find(query, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    # Filter by role visibility
+    role = current_user["role"]
+    messages = [m for m in messages if role in m.get("visible_to_roles", []) or m["sender_id"] == current_user["id"]]
+    
     return messages
 
 # ==================== DASHBOARD ENDPOINTS ====================
 
-@api_router.get("/dashboard/stats", response_model=DashboardStats)
+@api_router.get("/dashboard/stats")
 async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
-    query = {}
+    role = current_user["role"]
+    stats = {}
     
-    if current_user["role"] in [UserRole.CLIENT_B2B, UserRole.CLIENT_RESIDENTIAL]:
-        query["client_id"] = current_user["id"]
-    elif current_user["role"] == UserRole.PROJECT_MANAGER:
-        query["$or"] = [{"assigned_pm": current_user["id"]}, {"created_by": current_user["id"]}]
+    if role == UserRole.ADMIN:
+        total_deals = await db.deals.count_documents({})
+        active_deals = await db.deals.count_documents({"stage": {"$nin": [DealStage.COMPLETED, DealStage.CLOSED]}})
+        total_value = 0
+        deals = await db.deals.find({}, {"_id": 0}).to_list(1000)
+        for d in deals:
+            total_value += d.get("contract_value") or d.get("estimated_value") or 0
+        
+        stats = {
+            "total_deals": total_deals,
+            "active_deals": active_deals,
+            "completed_deals": await db.deals.count_documents({"stage": DealStage.COMPLETED}),
+            "total_pipeline_value": total_value,
+            "pending_approvals": await db.documents.count_documents({"approval_status": "pending"}),
+            "total_agents": await db.users.count_documents({"role": UserRole.SALES_AGENT}),
+            "total_partners": await db.users.count_documents({"role": UserRole.PARTNER})
+        }
     
-    projects = await db.projects.find(query, {"_id": 0}).to_list(1000)
+    elif role == UserRole.SALES_AGENT:
+        my_deals = await db.deals.find({"referral_agent_id": current_user["id"]}, {"_id": 0}).to_list(100)
+        commissions = await db.commissions.find({"agent_id": current_user["id"]}, {"_id": 0}).to_list(100)
+        
+        total_earned = sum(c.get("earned_amount", 0) for c in commissions)
+        total_released = sum(c.get("released_amount", 0) for c in commissions)
+        
+        stats = {
+            "total_deals": len(my_deals),
+            "active_deals": len([d for d in my_deals if d["stage"] not in [DealStage.COMPLETED, DealStage.CLOSED]]),
+            "deals_won": len([d for d in my_deals if d.get("contract_value")]),
+            "total_commission_earned": total_earned,
+            "commission_released": total_released,
+            "commission_pending": total_earned - total_released,
+            "pipeline_value": sum(d.get("estimated_value", 0) for d in my_deals if d["stage"] not in [DealStage.COMPLETED, DealStage.CLOSED])
+        }
     
-    total = len(projects)
-    active = sum(1 for p in projects if p["status"] not in [ProjectStatus.CLOSED, ProjectStatus.HANDOVER])
-    completed = sum(1 for p in projects if p["status"] == ProjectStatus.CLOSED)
-    total_budget = sum(p.get("budget", 0) for p in projects)
-    total_actuals = sum(p.get("actuals", 0) for p in projects)
+    elif role == UserRole.PROJECT_MANAGER:
+        my_deals = await db.deals.find({"assigned_pm": current_user["id"]}, {"_id": 0}).to_list(100)
+        stats = {
+            "assigned_deals": len(my_deals),
+            "in_execution": len([d for d in my_deals if d["stage"] in [DealStage.EXECUTION, DealStage.FABRICATION, DealStage.INSTALLATION]]),
+            "pending_handover": len([d for d in my_deals if d["stage"] == DealStage.HANDOVER]),
+            "overdue_tasks": await db.tasks.count_documents({"assigned_to": {"$exists": True}, "status": {"$ne": "completed"}, "end_date": {"$lt": datetime.now(timezone.utc).isoformat()[:10]}})
+        }
     
-    pending_cos = await db.change_orders.count_documents({"approval_status": "pending"})
-    pending_docs = await db.documents.count_documents({"approval_status": "pending"})
+    elif role in [UserRole.CLIENT_B2B, UserRole.CLIENT_RESIDENTIAL]:
+        my_deals = await db.deals.find({"$or": [{"client_email": current_user["email"]}, {"client_id": current_user["id"]}]}, {"_id": 0}).to_list(50)
+        stats = {
+            "my_projects": len(my_deals),
+            "in_progress": len([d for d in my_deals if d["stage"] not in [DealStage.COMPLETED, DealStage.CLOSED, DealStage.INQUIRY]]),
+            "completed": len([d for d in my_deals if d["stage"] == DealStage.COMPLETED])
+        }
     
-    today = datetime.now(timezone.utc).isoformat()[:10]
-    overdue = await db.tasks.count_documents({"end_date": {"$lt": today}, "status": {"$ne": "completed"}})
+    elif role == UserRole.SUPERVISOR:
+        stats = {
+            "assigned_sites": await db.deals.count_documents({"assigned_supervisor": current_user["id"]}),
+            "pending_updates": await db.tasks.count_documents({"assigned_to": current_user["id"], "status": {"$ne": "completed"}})
+        }
     
-    return DashboardStats(
-        total_projects=total,
-        active_projects=active,
-        completed_projects=completed,
-        total_budget=total_budget,
-        total_actuals=total_actuals,
-        pending_approvals=pending_cos + pending_docs,
-        overdue_tasks=overdue
-    )
+    elif role == UserRole.FABRICATOR:
+        tasks = await db.tasks.find({"assigned_to": current_user["id"]}, {"_id": 0}).to_list(100)
+        stats = {
+            "assigned_jobs": len(tasks),
+            "pending_jobs": len([t for t in tasks if t["status"] != "completed"]),
+            "completed_jobs": len([t for t in tasks if t["status"] == "completed"])
+        }
+    
+    elif role == UserRole.PARTNER:
+        my_deals = await db.deals.find({"partner_ids": current_user["id"]}, {"_id": 0}).to_list(100)
+        stats = {
+            "involved_deals": len(my_deals),
+            "active_collaborations": len([d for d in my_deals if d["stage"] not in [DealStage.COMPLETED, DealStage.CLOSED]])
+        }
+    
+    return stats
 
-@api_router.get("/dashboard/recent-activities")
-async def get_recent_activities(limit: int = 20, current_user: dict = Depends(get_current_user)):
+@api_router.get("/dashboard/pipeline")
+async def get_pipeline(current_user: dict = Depends(get_current_user)):
+    stages = [DealStage.INQUIRY, DealStage.QUOTATION, DealStage.NEGOTIATION, DealStage.CONTRACT, 
+              DealStage.EXECUTION, DealStage.FABRICATION, DealStage.INSTALLATION, DealStage.HANDOVER, DealStage.COMPLETED]
+    
+    pipeline = []
+    for stage in stages:
+        count = await db.deals.count_documents({"stage": stage})
+        deals_in_stage = await db.deals.find({"stage": stage}, {"_id": 0}).to_list(100)
+        value = sum(d.get("contract_value") or d.get("estimated_value") or 0 for d in deals_in_stage)
+        pipeline.append({"stage": stage, "count": count, "value": value})
+    
+    return pipeline
+
+@api_router.get("/dashboard/recent-activity")
+async def get_recent_activity(limit: int = 20, current_user: dict = Depends(get_current_user)):
     activities = await db.activity_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit).to_list(limit)
     return activities
-
-@api_router.get("/dashboard/project-summary")
-async def get_project_summary(current_user: dict = Depends(get_current_user)):
-    query = {}
-    
-    if current_user["role"] in [UserRole.CLIENT_B2B, UserRole.CLIENT_RESIDENTIAL]:
-        query["client_id"] = current_user["id"]
-    elif current_user["role"] == UserRole.PROJECT_MANAGER:
-        query["$or"] = [{"assigned_pm": current_user["id"]}, {"created_by": current_user["id"]}]
-    
-    projects = await db.projects.find(query, {"_id": 0}).to_list(1000)
-    
-    by_status = {}
-    for p in projects:
-        status = p["status"]
-        by_status[status] = by_status.get(status, 0) + 1
-    
-    by_service = {}
-    for p in projects:
-        for s in p.get("service_types", []):
-            by_service[s] = by_service.get(s, 0) + 1
-    
-    return {"by_status": by_status, "by_service": by_service, "total": len(projects)}
-
-# ==================== ACTIVITY LOG ====================
-
-async def log_activity(entity_id: str, action: str, description: str, user_id: str):
-    log_doc = {
-        "id": str(uuid.uuid4()),
-        "entity_id": entity_id,
-        "action": action,
-        "description": description,
-        "user_id": user_id,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-    await db.activity_logs.insert_one(log_doc)
-
-# ==================== NOTIFICATIONS ====================
-
-@api_router.get("/notifications")
-async def get_notifications(current_user: dict = Depends(get_current_user)):
-    notifications = await db.notifications.find({"user_id": current_user["id"]}, {"_id": 0}).sort("created_at", -1).limit(50).to_list(50)
-    return notifications
-
-@api_router.put("/notifications/{notification_id}/read")
-async def mark_notification_read(notification_id: str, current_user: dict = Depends(get_current_user)):
-    await db.notifications.update_one({"id": notification_id, "user_id": current_user["id"]}, {"$set": {"is_read": True}})
-    return {"message": "Notification marked as read"}
-
-# ==================== GANTT DATA ====================
-
-@api_router.get("/projects/{project_id}/gantt")
-async def get_gantt_data(project_id: str, current_user: dict = Depends(get_current_user)):
-    tasks = await db.tasks.find({"project_id": project_id}, {"_id": 0}).sort("start_date", 1).to_list(1000)
-    
-    gantt_tasks = []
-    for task in tasks:
-        gantt_tasks.append({
-            "id": task["id"],
-            "name": task["name"],
-            "start": task["start_date"],
-            "end": task["end_date"],
-            "progress": task.get("progress", 0),
-            "dependencies": task.get("dependencies", []),
-            "type": "milestone" if task.get("is_milestone") else "task",
-            "status": task.get("status", "pending")
-        })
-    
-    return {"tasks": gantt_tasks}
 
 # ==================== INIT ADMIN ====================
 
@@ -956,33 +884,63 @@ async def get_gantt_data(project_id: str, current_user: dict = Depends(get_curre
 async def init_admin():
     admin = await db.users.find_one({"role": UserRole.ADMIN})
     if admin:
-        return {"message": "Admin already exists", "created": False}
+        return {"message": "Admin exists", "created": False}
     
     admin_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
-    admin_doc = {
+    await db.users.insert_one({
         "id": admin_id,
-        "email": "admin@pms.com",
+        "email": "admin@dealcentric.com",
         "password": hash_password("Admin@123"),
         "name": "System Administrator",
         "role": UserRole.ADMIN,
-        "phone": None,
-        "company": "PMS Construction",
         "is_active": True,
         "created_at": now
+    })
+    
+    # Create sample sales agent
+    agent_id = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": agent_id,
+        "email": "agent@dealcentric.com",
+        "password": hash_password("Agent@123"),
+        "name": "John Agent",
+        "role": UserRole.SALES_AGENT,
+        "commission_rate": 5.0,
+        "is_active": True,
+        "created_at": now,
+        "deals_won": 0,
+        "total_commission_earned": 0
+    })
+    
+    # Create sample PM
+    pm_id = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": pm_id,
+        "email": "pm@dealcentric.com",
+        "password": hash_password("PM@123"),
+        "name": "Sarah Manager",
+        "role": UserRole.PROJECT_MANAGER,
+        "is_active": True,
+        "created_at": now
+    })
+    
+    return {
+        "message": "Initial users created",
+        "created": True,
+        "users": [
+            {"email": "admin@dealcentric.com", "password": "Admin@123", "role": "admin"},
+            {"email": "agent@dealcentric.com", "password": "Agent@123", "role": "sales_agent"},
+            {"email": "pm@dealcentric.com", "password": "PM@123", "role": "project_manager"}
+        ]
     }
-    
-    await db.users.insert_one(admin_doc)
-    
-    return {"message": "Admin created", "created": True, "email": "admin@pms.com", "password": "Admin@123"}
 
-# Root endpoint
 @api_router.get("/")
 async def root():
-    return {"message": "ProCon PMS API", "version": "1.0.0"}
+    return {"message": "Deal-Centric PMS API", "version": "2.0.0"}
 
-# Include the router
+# Include router
 app.include_router(api_router)
 
 app.add_middleware(
@@ -996,7 +954,3 @@ app.add_middleware(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
