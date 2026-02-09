@@ -69,3 +69,7 @@ export function truncate(str, len = 50) {
     if (!str) return '';
     return str.length > len ? str.substring(0, len) + '...' : str;
 }
+
+export function getRoleDisplayName(role) {
+    return roleNames[role] || role?.replace('_', ' ');
+}
