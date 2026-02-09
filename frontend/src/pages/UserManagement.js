@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import Header from '../components/layout/Header';
 import { useAuth } from '../context/AuthContext';
 import { useApi } from '../hooks/useApi';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -195,15 +194,18 @@ export default function UserManagement() {
     };
 
     return (
-        <div className="red-fade-bg min-h-screen" data-testid="users-page">
-            <Header
-                title="User Management"
-                subtitle={`${filteredUsers.length} users`}
-                actions={
-                    isAdmin && (
+        <div className="min-h-screen bg-slate-50" data-testid="users-page">
+            {/* Header */}
+            <div className="bg-white border-b border-slate-200 px-6 py-4">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="font-heading text-2xl font-bold text-slate-900">Team Management</h1>
+                        <p className="text-slate-500">{filteredUsers.length} users</p>
+                    </div>
+                    {isAdmin && (
                         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
                             <DialogTrigger asChild>
-                                <Button className="btn-glow bg-red-500 hover:bg-red-600" data-testid="add-user-btn">
+                                <Button className="btn-glow bg-gradient-to-r from-red-500 to-orange-500" data-testid="add-user-btn">
                                     <UserPlus className="w-4 h-4 mr-2" />
                                     Add User
                                 </Button>
@@ -293,9 +295,9 @@ export default function UserManagement() {
                                 </form>
                             </DialogContent>
                         </Dialog>
-                    )
-                }
-            />
+                    )}
+                </div>
+            </div>
 
             <div className="p-6">
                 {/* Filters */}

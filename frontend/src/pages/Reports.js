@@ -1,28 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import Header from '../components/layout/Header';
 import { useAuth } from '../context/AuthContext';
 import { useApi } from '../hooks/useApi';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '../components/ui/select';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
-import { DollarSign, TrendingUp, Activity, FolderKanban } from 'lucide-react';
-import { formatCurrency } from '../lib/utils';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { DollarSign, TrendingUp, Activity, Briefcase, Users, Award, FileText } from 'lucide-react';
+import { formatCurrency, getStageLabel } from '../lib/utils';
 import { toast } from 'sonner';
 
 export default function Reports() {
     const { get, loading } = useApi();
-    const [projects, setProjects] = useState([]);
-    const [financials, setFinancials] = useState([]);
-    const [summary, setSummary] = useState(null);
+    const [deals, setDeals] = useState([]);
+    const [pipeline, setPipeline] = useState([]);
+    const [stats, setStats] = useState(null);
+    const [users, setUsers] = useState([]);
 
-    const COLORS = ['#DC2626', '#EF4444', '#F87171', '#FCA5A5', '#FECACA'];
+    const COLORS = ['#DC2626', '#EF4444', '#F97316', '#FB923C', '#FBBF24', '#34D399', '#06B6D4', '#8B5CF6', '#EC4899'];
 
     useEffect(() => {
         fetchData();
@@ -30,108 +23,147 @@ export default function Reports() {
 
     const fetchData = async () => {
         try {
-            const [projectsData, summaryData] = await Promise.all([
-                get('/projects'),
-                get('/dashboard/project-summary')
+            const [dealsData, pipelineData, statsData, usersData] = await Promise.all([
+                get('/deals'),
+                get('/dashboard/pipeline'),
+                get('/dashboard/stats'),
+                get('/users').catch(() => [])
             ]);
-            setProjects(projectsData);
-            setSummary(summaryData);
+            setDeals(dealsData || []);
+            setPipeline(pipelineData || []);
+            setStats(statsData || {});
+            setUsers(usersData || []);
         } catch (error) {
             toast.error('Failed to load reports data');
         }
     };
 
-    // Process data for charts
-    const statusData = summary?.by_status
-        ? Object.entries(summary.by_status).map(([name, value]) => ({ name: name.charAt(0).toUpperCase() + name.slice(1), value }))
-        : [];
+    // Process pipeline data for chart
+    const pipelineChartData = pipeline
+        .filter(p => p.count > 0)
+        .map(p => ({
+            name: getStageLabel(p.stage),
+            deals: p.count,
+            value: p.value
+        }));
 
-    const serviceData = summary?.by_service
-        ? Object.entries(summary.by_service).map(([name, value]) => ({
-            name: name.replace('_', ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
-            value
-        }))
-        : [];
+    // Process deals by service type
+    const serviceTypeData = deals.reduce((acc, deal) => {
+        deal.service_types?.forEach(service => {
+            const existing = acc.find(s => s.name === service);
+            if (existing) {
+                existing.value += 1;
+            } else {
+                acc.push({ name: service.replace('_', ' '), value: 1 });
+            }
+        });
+        return acc;
+    }, []);
 
-    const financialData = projects.slice(0, 10).map(p => ({
-        name: p.name.length > 15 ? p.name.substring(0, 15) + '...' : p.name,
-        budget: p.budget,
-        actuals: p.actuals
-    }));
+    // Process deals by client type
+    const clientTypeData = deals.reduce((acc, deal) => {
+        const type = deal.client_type || 'Unknown';
+        const existing = acc.find(c => c.name === type);
+        if (existing) {
+            existing.value += 1;
+        } else {
+            acc.push({ name: type, value: 1 });
+        }
+        return acc;
+    }, []);
 
-    const progressData = projects.slice(0, 10).map(p => ({
-        name: p.name.length > 10 ? p.name.substring(0, 10) + '...' : p.name,
-        progress: p.progress_percentage
-    }));
+    // Top deals by value
+    const topDealsByValue = [...deals]
+        .sort((a, b) => (b.contract_value || b.estimated_value || 0) - (a.contract_value || a.estimated_value || 0))
+        .slice(0, 8)
+        .map(d => ({
+            name: d.name.length > 20 ? d.name.substring(0, 20) + '...' : d.name,
+            value: d.contract_value || d.estimated_value || 0
+        }));
+
+    // Users by role
+    const usersByRole = users.reduce((acc, user) => {
+        const role = user.role?.replace('_', ' ') || 'Unknown';
+        const existing = acc.find(r => r.name === role);
+        if (existing) {
+            existing.value += 1;
+        } else {
+            acc.push({ name: role, value: 1 });
+        }
+        return acc;
+    }, []);
 
     // Summary stats
-    const totalBudget = projects.reduce((sum, p) => sum + (p.budget || 0), 0);
-    const totalActuals = projects.reduce((sum, p) => sum + (p.actuals || 0), 0);
-    const avgProgress = projects.length > 0
-        ? Math.round(projects.reduce((sum, p) => sum + (p.progress_percentage || 0), 0) / projects.length)
-        : 0;
+    const totalPipelineValue = deals.reduce((sum, d) => sum + (d.contract_value || d.estimated_value || 0), 0);
+    const activeDeals = deals.filter(d => !['completed', 'closed'].includes(d.stage)).length;
+    const completedDeals = deals.filter(d => d.stage === 'completed').length;
 
     return (
-        <div className="red-fade-bg min-h-screen" data-testid="reports-page">
-            <Header
-                title="Reports & Analytics"
-                subtitle="Project performance insights"
-            />
+        <div className="min-h-screen bg-slate-50" data-testid="reports-page">
+            {/* Header */}
+            <div className="bg-white border-b border-slate-200 px-6 py-4">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="font-heading text-2xl font-bold text-slate-900">Reports & Analytics</h1>
+                        <p className="text-slate-500">Deal performance insights</p>
+                    </div>
+                </div>
+            </div>
 
             <div className="p-6 space-y-6">
                 {/* Summary Stats */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <Card className="kpi-card">
+                    <Card className="bg-gradient-to-br from-red-500 to-orange-500 text-white border-0">
                         <CardContent className="p-4">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
-                                    <FolderKanban className="w-5 h-5 text-red-500" />
+                                <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
+                                    <Briefcase className="w-5 h-5" />
                                 </div>
                                 <div>
-                                    <p className="text-sm text-gray-500">Total Projects</p>
-                                    <p className="font-heading text-2xl font-bold">{projects.length}</p>
+                                    <p className="text-red-100 text-sm">Total Deals</p>
+                                    <p className="font-heading text-2xl font-bold">{deals.length}</p>
                                 </div>
                             </div>
                         </CardContent>
                     </Card>
 
-                    <Card className="kpi-card">
+                    <Card className="bg-gradient-to-br from-green-500 to-emerald-500 text-white border-0">
                         <CardContent className="p-4">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                                    <DollarSign className="w-5 h-5 text-green-500" />
+                                <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
+                                    <DollarSign className="w-5 h-5" />
                                 </div>
                                 <div>
-                                    <p className="text-sm text-gray-500">Total Budget</p>
-                                    <p className="font-heading text-2xl font-bold">{formatCurrency(totalBudget)}</p>
+                                    <p className="text-green-100 text-sm">Pipeline Value</p>
+                                    <p className="font-heading text-2xl font-bold">{formatCurrency(totalPipelineValue)}</p>
                                 </div>
                             </div>
                         </CardContent>
                     </Card>
 
-                    <Card className="kpi-card">
+                    <Card className="bg-gradient-to-br from-blue-500 to-cyan-500 text-white border-0">
                         <CardContent className="p-4">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                                    <TrendingUp className="w-5 h-5 text-blue-500" />
+                                <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
+                                    <TrendingUp className="w-5 h-5" />
                                 </div>
                                 <div>
-                                    <p className="text-sm text-gray-500">Total Spent</p>
-                                    <p className="font-heading text-2xl font-bold">{formatCurrency(totalActuals)}</p>
+                                    <p className="text-blue-100 text-sm">Active Deals</p>
+                                    <p className="font-heading text-2xl font-bold">{activeDeals}</p>
                                 </div>
                             </div>
                         </CardContent>
                     </Card>
 
-                    <Card className="kpi-card">
+                    <Card className="bg-gradient-to-br from-purple-500 to-violet-500 text-white border-0">
                         <CardContent className="p-4">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                                    <Activity className="w-5 h-5 text-purple-500" />
+                                <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
+                                    <Award className="w-5 h-5" />
                                 </div>
                                 <div>
-                                    <p className="text-sm text-gray-500">Avg Progress</p>
-                                    <p className="font-heading text-2xl font-bold">{avgProgress}%</p>
+                                    <p className="text-purple-100 text-sm">Completed</p>
+                                    <p className="font-heading text-2xl font-bold">{completedDeals}</p>
                                 </div>
                             </div>
                         </CardContent>
@@ -140,19 +172,42 @@ export default function Reports() {
 
                 {/* Charts Row 1 */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Projects by Status */}
+                    {/* Deal Pipeline */}
                     <Card>
                         <CardHeader>
-                            <CardTitle className="font-heading">Projects by Status</CardTitle>
+                            <CardTitle className="font-heading">Deal Pipeline by Stage</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            {statusData.length === 0 ? (
-                                <div className="text-center py-8 text-gray-500">No data available</div>
+                            {pipelineChartData.length === 0 ? (
+                                <div className="text-center py-8 text-slate-500">No data available</div>
+                            ) : (
+                                <ResponsiveContainer width="100%" height={300}>
+                                    <BarChart data={pipelineChartData}>
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={80} />
+                                        <YAxis />
+                                        <Tooltip formatter={(value, name) => [name === 'value' ? formatCurrency(value) : value, name === 'value' ? 'Value' : 'Deals']} />
+                                        <Legend />
+                                        <Bar dataKey="deals" fill="#DC2626" name="Deals" radius={[4, 4, 0, 0]} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            )}
+                        </CardContent>
+                    </Card>
+
+                    {/* Deals by Service Type */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="font-heading">Deals by Service Type</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            {serviceTypeData.length === 0 ? (
+                                <div className="text-center py-8 text-slate-500">No data available</div>
                             ) : (
                                 <ResponsiveContainer width="100%" height={300}>
                                     <PieChart>
                                         <Pie
-                                            data={statusData}
+                                            data={serviceTypeData}
                                             cx="50%"
                                             cy="50%"
                                             labelLine={false}
@@ -161,7 +216,7 @@ export default function Reports() {
                                             fill="#8884d8"
                                             dataKey="value"
                                         >
-                                            {statusData.map((entry, index) => (
+                                            {serviceTypeData.map((entry, index) => (
                                                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                                             ))}
                                         </Pie>
@@ -171,73 +226,59 @@ export default function Reports() {
                             )}
                         </CardContent>
                     </Card>
-
-                    {/* Projects by Service Type */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="font-heading">Projects by Service Type</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            {serviceData.length === 0 ? (
-                                <div className="text-center py-8 text-gray-500">No data available</div>
-                            ) : (
-                                <ResponsiveContainer width="100%" height={300}>
-                                    <BarChart data={serviceData}>
-                                        <CartesianGrid strokeDasharray="3 3" />
-                                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                                        <YAxis />
-                                        <Tooltip />
-                                        <Bar dataKey="value" fill="#DC2626" radius={[4, 4, 0, 0]} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            )}
-                        </CardContent>
-                    </Card>
                 </div>
 
                 {/* Charts Row 2 */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Budget vs Actuals */}
+                    {/* Top Deals by Value */}
                     <Card>
                         <CardHeader>
-                            <CardTitle className="font-heading">Budget vs Actuals</CardTitle>
+                            <CardTitle className="font-heading">Top Deals by Value</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            {financialData.length === 0 ? (
-                                <div className="text-center py-8 text-gray-500">No data available</div>
+                            {topDealsByValue.length === 0 ? (
+                                <div className="text-center py-8 text-slate-500">No data available</div>
                             ) : (
                                 <ResponsiveContainer width="100%" height={300}>
-                                    <BarChart data={financialData}>
+                                    <BarChart data={topDealsByValue} layout="vertical">
                                         <CartesianGrid strokeDasharray="3 3" />
-                                        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                                        <YAxis tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                                        <XAxis type="number" tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                                        <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 10 }} />
                                         <Tooltip formatter={(value) => formatCurrency(value)} />
-                                        <Legend />
-                                        <Bar dataKey="budget" fill="#DC2626" name="Budget" radius={[4, 4, 0, 0]} />
-                                        <Bar dataKey="actuals" fill="#10B981" name="Actuals" radius={[4, 4, 0, 0]} />
+                                        <Bar dataKey="value" fill="#10B981" radius={[0, 4, 4, 0]} />
                                     </BarChart>
                                 </ResponsiveContainer>
                             )}
                         </CardContent>
                     </Card>
 
-                    {/* Project Progress */}
+                    {/* Users by Role / Client Type */}
                     <Card>
                         <CardHeader>
-                            <CardTitle className="font-heading">Project Progress</CardTitle>
+                            <CardTitle className="font-heading">Deals by Client Type</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            {progressData.length === 0 ? (
-                                <div className="text-center py-8 text-gray-500">No data available</div>
+                            {clientTypeData.length === 0 ? (
+                                <div className="text-center py-8 text-slate-500">No data available</div>
                             ) : (
                                 <ResponsiveContainer width="100%" height={300}>
-                                    <BarChart data={progressData} layout="vertical">
-                                        <CartesianGrid strokeDasharray="3 3" />
-                                        <XAxis type="number" domain={[0, 100]} />
-                                        <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 10 }} />
-                                        <Tooltip formatter={(value) => `${value}%`} />
-                                        <Bar dataKey="progress" fill="#DC2626" radius={[0, 4, 4, 0]} />
-                                    </BarChart>
+                                    <PieChart>
+                                        <Pie
+                                            data={clientTypeData}
+                                            cx="50%"
+                                            cy="50%"
+                                            labelLine={false}
+                                            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                            outerRadius={100}
+                                            fill="#8884d8"
+                                            dataKey="value"
+                                        >
+                                            {clientTypeData.map((entry, index) => (
+                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip />
+                                    </PieChart>
                                 </ResponsiveContainer>
                             )}
                         </CardContent>
