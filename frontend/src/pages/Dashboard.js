@@ -396,7 +396,8 @@ export default function Dashboard() {
             }
         };
         fetchData();
-    }, [get, isAdmin, isPM]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const getGreeting = () => {
         const hour = new Date().getHours();
