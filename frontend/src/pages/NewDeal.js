@@ -164,23 +164,31 @@ export default function NewDeal() {
                             <div className="space-y-3">
                                 <Label>Service Types Required *</Label>
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                    {serviceTypes.map((service) => (
-                                        <div
-                                            key={service.id}
-                                            className={`flex items-center space-x-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
-                                                formData.service_types.includes(service.id)
-                                                    ? 'border-red-500 bg-red-50'
-                                                    : 'border-slate-200 hover:border-slate-300'
-                                            }`}
-                                            onClick={() => handleServiceToggle(service.id)}
-                                        >
-                                            <Checkbox
-                                                checked={formData.service_types.includes(service.id)}
-                                                data-testid={`service-${service.id}`}
-                                            />
-                                            <span className="text-sm font-medium">{service.name}</span>
-                                        </div>
-                                    ))}
+                                    {serviceTypes.map((service) => {
+                                        const isSelected = formData.service_types.includes(service.id);
+                                        return (
+                                            <div
+                                                key={service.id}
+                                                className={`flex items-center space-x-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                                                    isSelected
+                                                        ? 'border-red-500 bg-red-50'
+                                                        : 'border-slate-200 hover:border-slate-300'
+                                                }`}
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    handleServiceToggle(service.id);
+                                                }}
+                                            >
+                                                <Checkbox
+                                                    checked={isSelected}
+                                                    onCheckedChange={() => {}}
+                                                    data-testid={`service-${service.id}`}
+                                                />
+                                                <span className="text-sm font-medium">{service.name}</span>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </div>
 
