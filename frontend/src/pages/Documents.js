@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import Header from '../components/layout/Header';
+import { useAuth } from '../context/AuthContext';
 import { useApi } from '../hooks/useApi';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
 import {
     Table,
     TableBody,
@@ -12,7 +13,7 @@ import {
     TableHeader,
     TableRow,
 } from '../components/ui/table';
-import { FileText, Search, Filter } from 'lucide-react';
+import { FileText, Search, Filter, Upload, FolderOpen, Eye, Download } from 'lucide-react';
 import { Input } from '../components/ui/input';
 import {
     Select,
@@ -21,24 +22,22 @@ import {
     SelectTrigger,
     SelectValue,
 } from '../components/ui/select';
-import { formatDateTime, getStatusClass } from '../lib/utils';
+import { formatDateTime } from '../lib/utils';
 import { toast } from 'sonner';
 
 export default function Documents() {
-    const { get, loading } = useApi();
+    const { isAdmin, isPM } = useAuth();
+    const { get, put, loading } = useApi();
     const [documents, setDocuments] = useState([]);
-    const [projects, setProjects] = useState([]);
+    const [deals, setDeals] = useState([]);
     const [filteredDocs, setFilteredDocs] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
-    const [typeFilter, setTypeFilter] = useState('all');
+    const [categoryFilter, setCategoryFilter] = useState('all');
 
-    const docTypes = [
-        { value: 'contract_addendum', label: 'Contract Addendum' },
-        { value: 'shop_drawing', label: 'Shop Drawing' },
-        { value: 'RFI', label: 'RFI' },
-        { value: 'invoice', label: 'Invoice' },
-        { value: 'asbuilt', label: 'As-Built' },
-        { value: 'photo', label: 'Photo' }
+    const categories = [
+        { value: 'client_facing', label: 'Client-Facing' },
+        { value: 'internal', label: 'Internal' },
+        { value: 'deal_relationship', label: 'Deal/Relationship' }
     ];
 
     useEffect(() => {
@@ -47,13 +46,13 @@ export default function Documents() {
 
     const fetchData = async () => {
         try {
-            const [docsData, projectsData] = await Promise.all([
+            const [docsData, dealsData] = await Promise.all([
                 get('/documents'),
-                get('/projects')
+                get('/deals')
             ]);
-            setDocuments(docsData);
-            setFilteredDocs(docsData);
-            setProjects(projectsData);
+            setDocuments(docsData || []);
+            setFilteredDocs(docsData || []);
+            setDeals(dealsData || []);
         } catch (error) {
             toast.error('Failed to load documents');
         }
@@ -64,16 +63,26 @@ export default function Documents() {
 
         if (searchTerm) {
             filtered = filtered.filter(d =>
-                d.name.toLowerCase().includes(searchTerm.toLowerCase())
+                d.name?.toLowerCase().includes(searchTerm.toLowerCase())
             );
         }
 
-        if (typeFilter !== 'all') {
-            filtered = filtered.filter(d => d.doc_type === typeFilter);
+        if (categoryFilter !== 'all') {
+            filtered = filtered.filter(d => d.category === categoryFilter);
         }
 
         setFilteredDocs(filtered);
-    }, [searchTerm, typeFilter, documents]);
+    }, [searchTerm, categoryFilter, documents]);
+
+    const handleApprove = async (docId, approved) => {
+        try {
+            await put(`/documents/${docId}/approve`, null, { params: { approved } });
+            toast.success(`Document ${approved ? 'approved' : 'rejected'}`);
+            fetchData();
+        } catch (error) {
+            toast.error('Failed to update document');
+        }
+    };
 
     const getApprovalBadge = (status) => {
         switch (status) {
@@ -86,12 +95,30 @@ export default function Documents() {
         }
     };
 
+    const getCategoryBadge = (category) => {
+        switch (category) {
+            case 'client_facing':
+                return <Badge className="bg-blue-100 text-blue-700">Client-Facing</Badge>;
+            case 'internal':
+                return <Badge className="bg-slate-100 text-slate-700">Internal</Badge>;
+            case 'deal_relationship':
+                return <Badge className="bg-purple-100 text-purple-700">Deal/Relationship</Badge>;
+            default:
+                return <Badge variant="secondary">{category}</Badge>;
+        }
+    };
+
     return (
-        <div className="red-fade-bg min-h-screen" data-testid="documents-page">
-            <Header
-                title="Document Library"
-                subtitle={`${filteredDocs.length} documents`}
-            />
+        <div className="min-h-screen bg-slate-50" data-testid="documents-page">
+            {/* Header */}
+            <div className="bg-white border-b border-slate-200 px-6 py-4">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="font-heading text-2xl font-bold text-slate-900">Document Library</h1>
+                        <p className="text-slate-500">{filteredDocs.length} documents</p>
+                    </div>
+                </div>
+            </div>
 
             <div className="p-6">
                 {/* Filters */}
@@ -99,7 +126,7 @@ export default function Documents() {
                     <CardContent className="p-4">
                         <div className="flex flex-col md:flex-row gap-4">
                             <div className="flex-1 relative">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                                 <Input
                                     placeholder="Search documents..."
                                     value={searchTerm}
@@ -108,14 +135,15 @@ export default function Documents() {
                                     data-testid="search-docs"
                                 />
                             </div>
-                            <Select value={typeFilter} onValueChange={setTypeFilter}>
-                                <SelectTrigger className="w-full md:w-48" data-testid="type-filter">
-                                    <SelectValue placeholder="Document Type" />
+                            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                                <SelectTrigger className="w-full md:w-48" data-testid="category-filter">
+                                    <Filter className="w-4 h-4 mr-2" />
+                                    <SelectValue placeholder="Category" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">All Types</SelectItem>
-                                    {docTypes.map(type => (
-                                        <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
+                                    <SelectItem value="all">All Categories</SelectItem>
+                                    {categories.map(cat => (
+                                        <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
@@ -128,47 +156,92 @@ export default function Documents() {
                     <CardContent className="p-0">
                         {filteredDocs.length === 0 ? (
                             <div className="text-center py-12">
-                                <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                                <h3 className="text-lg font-medium text-gray-900 mb-2">No Documents Found</h3>
-                                <p className="text-gray-500">Upload documents from project detail pages.</p>
+                                <FolderOpen className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                                <h3 className="text-lg font-medium text-slate-900 mb-2">No Documents Found</h3>
+                                <p className="text-slate-500">Upload documents from deal detail pages.</p>
                             </div>
                         ) : (
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>Name</TableHead>
-                                        <TableHead>Type</TableHead>
-                                        <TableHead>Project</TableHead>
+                                        <TableHead>Document</TableHead>
+                                        <TableHead>Category</TableHead>
+                                        <TableHead>Deal</TableHead>
                                         <TableHead>Version</TableHead>
                                         <TableHead>Status</TableHead>
                                         <TableHead>Uploaded</TableHead>
+                                        <TableHead className="text-right">Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {filteredDocs.map((doc) => {
-                                        const project = projects.find(p => p.id === doc.project_id);
+                                        const deal = deals.find(d => d.id === doc.deal_id);
                                         return (
-                                            <TableRow key={doc.id} className="table-row-hover" data-testid={`doc-row-${doc.id}`}>
+                                            <TableRow key={doc.id} className="hover:bg-slate-50" data-testid={`doc-row-${doc.id}`}>
                                                 <TableCell>
-                                                    <a
-                                                        href={`${process.env.REACT_APP_BACKEND_URL}${doc.file_path}`}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="flex items-center gap-2 text-red-500 hover:underline"
-                                                    >
-                                                        <FileText className="w-4 h-4" />
-                                                        {doc.name}
-                                                    </a>
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+                                                            <FileText className="w-5 h-5 text-red-500" />
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-medium">{doc.name}</p>
+                                                            <p className="text-sm text-slate-500">{doc.doc_type}</p>
+                                                        </div>
+                                                    </div>
                                                 </TableCell>
-                                                <TableCell className="capitalize">{doc.doc_type.replace('_', ' ')}</TableCell>
+                                                <TableCell>{getCategoryBadge(doc.category)}</TableCell>
                                                 <TableCell>
-                                                    <Link to={`/projects/${doc.project_id}`} className="text-red-500 hover:underline">
-                                                        {project?.name || 'Unknown'}
-                                                    </Link>
+                                                    {deal ? (
+                                                        <Link to={`/deals/${doc.deal_id}`} className="text-red-500 hover:underline">
+                                                            {deal.name}
+                                                        </Link>
+                                                    ) : (
+                                                        <span className="text-slate-400">Unknown</span>
+                                                    )}
                                                 </TableCell>
-                                                <TableCell>v{doc.version}</TableCell>
+                                                <TableCell>
+                                                    <Badge variant="outline">v{doc.version}</Badge>
+                                                </TableCell>
                                                 <TableCell>{getApprovalBadge(doc.approval_status)}</TableCell>
-                                                <TableCell className="text-sm text-gray-500">{formatDateTime(doc.created_at)}</TableCell>
+                                                <TableCell>
+                                                    <div className="text-sm">
+                                                        <p className="text-slate-900">{doc.uploaded_by_name}</p>
+                                                        <p className="text-slate-500">{formatDateTime(doc.created_at)}</p>
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    <div className="flex items-center justify-end gap-2">
+                                                        <a
+                                                            href={`${process.env.REACT_APP_BACKEND_URL}${doc.file_path}`}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                        >
+                                                            <Button variant="ghost" size="sm">
+                                                                <Eye className="w-4 h-4" />
+                                                            </Button>
+                                                        </a>
+                                                        {(isAdmin || isPM) && doc.approval_status === 'pending' && (
+                                                            <>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    className="text-green-600"
+                                                                    onClick={() => handleApprove(doc.id, true)}
+                                                                >
+                                                                    Approve
+                                                                </Button>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    className="text-red-600"
+                                                                    onClick={() => handleApprove(doc.id, false)}
+                                                                >
+                                                                    Reject
+                                                                </Button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </TableCell>
                                             </TableRow>
                                         );
                                     })}
