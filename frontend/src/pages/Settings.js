@@ -1,5 +1,4 @@
 import React from 'react';
-import Header from '../components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Settings as SettingsIcon, Bell, Shield, Palette, Database } from 'lucide-react';
 import { Switch } from '../components/ui/switch';
@@ -7,11 +6,16 @@ import { Label } from '../components/ui/label';
 
 export default function Settings() {
     return (
-        <div className="red-fade-bg min-h-screen" data-testid="settings-page">
-            <Header
-                title="Settings"
-                subtitle="System configuration"
-            />
+        <div className="min-h-screen bg-slate-50" data-testid="settings-page">
+            {/* Header */}
+            <div className="bg-white border-b border-slate-200 px-6 py-4">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="font-heading text-2xl font-bold text-slate-900">Settings</h1>
+                        <p className="text-slate-500">System configuration</p>
+                    </div>
+                </div>
+            </div>
 
             <div className="p-6 max-w-4xl mx-auto space-y-6">
                 {/* Notifications */}
