@@ -165,19 +165,26 @@ export default function Login() {
 
                         <div className="mt-6 p-4 bg-slate-50 rounded-xl">
                             <p className="text-xs text-slate-500 text-center mb-3 font-medium">Demo Credentials</p>
-                            <div className="space-y-2 text-sm">
-                                <div className="flex justify-between p-2 bg-white rounded-lg">
-                                    <span className="text-slate-600">Admin</span>
-                                    <code className="text-red-600">admin@dealcentric.com / Admin@123</code>
+                            <div className="space-y-2 text-xs">
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div className="p-2 bg-white rounded-lg">
+                                        <span className="text-slate-500 block">Admin</span>
+                                        <code className="text-red-600">admin@dealcentric.com</code>
+                                    </div>
+                                    <div className="p-2 bg-white rounded-lg">
+                                        <span className="text-slate-500 block">Agent</span>
+                                        <code className="text-red-600">agent@dealcentric.com</code>
+                                    </div>
+                                    <div className="p-2 bg-white rounded-lg">
+                                        <span className="text-slate-500 block">PM</span>
+                                        <code className="text-red-600">pm@dealcentric.com</code>
+                                    </div>
+                                    <div className="p-2 bg-white rounded-lg">
+                                        <span className="text-slate-500 block">Client</span>
+                                        <code className="text-red-600">client@dealcentric.com</code>
+                                    </div>
                                 </div>
-                                <div className="flex justify-between p-2 bg-white rounded-lg">
-                                    <span className="text-slate-600">Agent</span>
-                                    <code className="text-red-600">agent@dealcentric.com / Agent@123</code>
-                                </div>
-                                <div className="flex justify-between p-2 bg-white rounded-lg">
-                                    <span className="text-slate-600">PM</span>
-                                    <code className="text-red-600">pm@dealcentric.com / PM@123</code>
-                                </div>
+                                <p className="text-center text-slate-400 mt-2">Password: Role@123 (e.g., Admin@123)</p>
                             </div>
                         </div>
                     </CardContent>
