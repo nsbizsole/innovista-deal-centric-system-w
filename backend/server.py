@@ -889,6 +889,7 @@ async def init_admin():
     admin_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
+    # Create Admin
     await db.users.insert_one({
         "id": admin_id,
         "email": "admin@dealcentric.com",
@@ -899,7 +900,7 @@ async def init_admin():
         "created_at": now
     })
     
-    # Create sample sales agent
+    # Create Sales Agent
     agent_id = str(uuid.uuid4())
     await db.users.insert_one({
         "id": agent_id,
@@ -914,7 +915,7 @@ async def init_admin():
         "total_commission_earned": 0
     })
     
-    # Create sample PM
+    # Create Project Manager
     pm_id = str(uuid.uuid4())
     await db.users.insert_one({
         "id": pm_id,
@@ -926,13 +927,80 @@ async def init_admin():
         "created_at": now
     })
     
+    # Create Site Supervisor
+    supervisor_id = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": supervisor_id,
+        "email": "supervisor@dealcentric.com",
+        "password": hash_password("Super@123"),
+        "name": "Mike Supervisor",
+        "role": UserRole.SUPERVISOR,
+        "is_active": True,
+        "created_at": now
+    })
+    
+    # Create Fabricator
+    fabricator_id = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": fabricator_id,
+        "email": "fab@dealcentric.com",
+        "password": hash_password("Fab@123"),
+        "name": "Tony Fabricator",
+        "role": UserRole.FABRICATOR,
+        "is_active": True,
+        "created_at": now
+    })
+    
+    # Create Strategic Partner
+    partner_id = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": partner_id,
+        "email": "partner@dealcentric.com",
+        "password": hash_password("Partner@123"),
+        "name": "Lisa Partner",
+        "role": UserRole.PARTNER,
+        "company": "Partner Corp",
+        "is_active": True,
+        "created_at": now
+    })
+    
+    # Create B2B Client
+    client_b2b_id = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": client_b2b_id,
+        "email": "client@dealcentric.com",
+        "password": hash_password("Client@123"),
+        "name": "ABC Corporation",
+        "role": UserRole.CLIENT_B2B,
+        "company": "ABC Corp",
+        "is_active": True,
+        "created_at": now
+    })
+    
+    # Create Residential Client
+    client_res_id = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": client_res_id,
+        "email": "homeowner@dealcentric.com",
+        "password": hash_password("Home@123"),
+        "name": "David Homeowner",
+        "role": UserRole.CLIENT_RESIDENTIAL,
+        "is_active": True,
+        "created_at": now
+    })
+    
     return {
         "message": "Initial users created",
         "created": True,
         "users": [
             {"email": "admin@dealcentric.com", "password": "Admin@123", "role": "admin"},
             {"email": "agent@dealcentric.com", "password": "Agent@123", "role": "sales_agent"},
-            {"email": "pm@dealcentric.com", "password": "PM@123", "role": "project_manager"}
+            {"email": "pm@dealcentric.com", "password": "PM@123", "role": "project_manager"},
+            {"email": "supervisor@dealcentric.com", "password": "Super@123", "role": "supervisor"},
+            {"email": "fab@dealcentric.com", "password": "Fab@123", "role": "fabricator"},
+            {"email": "partner@dealcentric.com", "password": "Partner@123", "role": "partner"},
+            {"email": "client@dealcentric.com", "password": "Client@123", "role": "client_b2b"},
+            {"email": "homeowner@dealcentric.com", "password": "Home@123", "role": "client_residential"}
         ]
     }
 
