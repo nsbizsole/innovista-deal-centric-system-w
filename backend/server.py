@@ -1004,6 +1004,43 @@ async def init_admin():
         ]
     }
 
+@api_router.post("/seed-demo")
+async def seed_demo_users():
+    """Seed demo users if they don't exist - useful for testing all roles"""
+    now = datetime.now(timezone.utc).isoformat()
+    created = []
+    
+    demo_users = [
+        {"email": "supervisor@dealcentric.com", "password": "Super@123", "name": "Mike Supervisor", "role": UserRole.SUPERVISOR},
+        {"email": "fab@dealcentric.com", "password": "Fab@123", "name": "Tony Fabricator", "role": UserRole.FABRICATOR},
+        {"email": "partner@dealcentric.com", "password": "Partner@123", "name": "Lisa Partner", "role": UserRole.PARTNER, "company": "Partner Corp"},
+        {"email": "client@dealcentric.com", "password": "Client@123", "name": "ABC Corporation", "role": UserRole.CLIENT_B2B, "company": "ABC Corp"},
+        {"email": "homeowner@dealcentric.com", "password": "Home@123", "name": "David Homeowner", "role": UserRole.CLIENT_RESIDENTIAL},
+    ]
+    
+    for user_data in demo_users:
+        existing = await db.users.find_one({"email": user_data["email"]})
+        if not existing:
+            user_id = str(uuid.uuid4())
+            user_doc = {
+                "id": user_id,
+                "email": user_data["email"],
+                "password": hash_password(user_data["password"]),
+                "name": user_data["name"],
+                "role": user_data["role"],
+                "company": user_data.get("company"),
+                "is_active": True,
+                "created_at": now
+            }
+            if user_data["role"] == UserRole.SALES_AGENT:
+                user_doc["commission_rate"] = 5.0
+                user_doc["deals_won"] = 0
+                user_doc["total_commission_earned"] = 0
+            await db.users.insert_one(user_doc)
+            created.append(user_data["email"])
+    
+    return {"message": f"Created {len(created)} users", "created_users": created}
+
 @api_router.get("/")
 async def root():
     return {"message": "Deal-Centric PMS API", "version": "2.0.0"}
