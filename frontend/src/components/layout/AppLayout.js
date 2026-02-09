@@ -9,10 +9,10 @@ const AppLayout = () => {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
+            <div className="min-h-screen flex items-center justify-center bg-slate-50">
                 <div className="text-center">
                     <div className="spinner mx-auto mb-4"></div>
-                    <p className="text-gray-500">Loading...</p>
+                    <p className="text-slate-500">Loading your workspace...</p>
                 </div>
             </div>
         );
@@ -23,9 +23,9 @@ const AppLayout = () => {
     }
 
     return (
-        <div className="app-layout bg-gray-50 min-h-screen">
+        <div className="flex min-h-screen bg-slate-50">
             <Sidebar />
-            <main className="main-content">
+            <main className="flex-1 ml-64">
                 <Outlet />
             </main>
             <Toaster position="top-right" richColors />
